@@ -2,6 +2,8 @@
 
 Graph-based + GNN recommendation system with A/B testing capabilities.
 
+![Recommendate](recommendation-engine.png)
+
 ## Tech Stack
 
 - **FastAPI**: REST API framework
@@ -171,5 +173,6 @@ project/
 - A/B test winner automatically takes over post-threshold
 
 ## License
+
 
 MIT
