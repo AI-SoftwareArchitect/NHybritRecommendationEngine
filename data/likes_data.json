@@ -1,0 +1,16 @@
+[
+  {
+    "user_id": "test-user-123",
+    "note_id": "test-note-456",
+    "ab_group": "A",
+    "timestamp": "2025-12-18T19:10:44.314718",
+    "liked_note_id": "test-note-456"
+  },
+  {
+    "user_id": "test-user-123",
+    "note_id": "test-note-456",
+    "ab_group": "B",
+    "timestamp": "2025-12-18T19:10:46.425690",
+    "liked_note_id": "test-note-456"
+  }
+]

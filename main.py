@@ -1,4 +1,6 @@
+from contextlib import asynccontextmanager
 from fastapi import FastAPI, BackgroundTasks, Query, HTTPException
+from apscheduler.schedulers.asyncio import AsyncIOScheduler
 from models.schemas import (
     ABTestGroup, LikeRequest, RecommendationResponse, 
     ABTestCounts, HealthResponse
@@ -6,15 +8,74 @@ from models.schemas import (
 from services.ab_test_service import get_ab_test_service
 from services.recommendation_service import get_recommendation_service
 from services.gnn_service import get_gnn_service
+from services.data_sync_service import get_data_sync_service
 from database.neo4j_client import get_neo4j_client
-
-app = FastAPI(title="Note Recommendation API", version="1.0.0")
+from config.settings import get_settings
 
 # Initialize services
 ab_test_service = get_ab_test_service()
 recommendation_service = get_recommendation_service()
 gnn_service = get_gnn_service()
 neo4j_client = get_neo4j_client()
+data_sync_service = get_data_sync_service()
+settings = get_settings()
+
+# Scheduler for background tasks
+scheduler = AsyncIOScheduler()
+
+
+def scheduled_sync_job():
+    """Background job for scheduled data sync."""
+    try:
+        data_sync_service.run_scheduled_sync()
+    except Exception as e:
+        print(f"✗ Scheduled sync error: {e}")
+
+
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    """Lifespan context manager for startup and shutdown events."""
+    # Startup
+    print("Starting Note Recommendation API...")
+    print("Checking Neo4j connection...")
+    
+    if neo4j_client.verify_connectivity():
+        print("✓ Neo4j connected successfully")
+        
+        # Run initial data sync
+        print("\nRunning initial data sync...")
+        try:
+            count = data_sync_service.sync_notes()
+            print(f"✓ Initial sync completed: {count} notes")
+        except Exception as e:
+            print(f"✗ Initial sync failed: {e}")
+        
+        # Schedule hourly sync
+        scheduler.add_job(
+            scheduled_sync_job,
+            'interval',
+            hours=settings.sync_interval_hours,
+            id='hourly_sync',
+            replace_existing=True
+        )
+        scheduler.start()
+        print(f"✓ Scheduled hourly sync (every {settings.sync_interval_hours} hour(s))")
+    else:
+        print("✗ Warning: Neo4j connection failed")
+    
+    yield
+    
+    # Shutdown
+    scheduler.shutdown(wait=False)
+    neo4j_client.close()
+    print("Application shutdown complete")
+
+
+app = FastAPI(
+    title="Note Recommendation API",
+    version="2.0.0",
+    lifespan=lifespan
+)
 
 
 def retrain_model_task():
@@ -22,8 +83,6 @@ def retrain_model_task():
     try:
         # Load likes data
         import json
-        from config.settings import get_settings
-        settings = get_settings()
         
         with open(settings.ab_test_data_path, 'r') as f:
             likes_data = json.load(f)
@@ -54,7 +113,7 @@ async def like_note(
                 MATCH (u:User {user_id: $user_id})
                 MATCH (n:Note {note_id: $note_id})
                 MERGE (u)-[:LIKED]->(n)
-                SET n.like_count = n.like_count + 1
+                SET n.like_count = COALESCE(n.like_count, 0) + 1
                 """,
                 user_id=user_id,
                 note_id=note_id
@@ -79,42 +138,35 @@ async def like_note(
 
 @app.get("/recommend", response_model=RecommendationResponse)
 async def recommend_notes(
-    user_id: str = Query(..., description="User UUID"),
-    ab_test: ABTestGroup = Query(None, description="A/B test group (optional)")
+    user_id: str = Query(..., description="User UUID")
 ):
     """
-    Get personalized note recommendations
-    Uses winning A/B group after threshold date
+    Get personalized note recommendations.
+    Uses hybrid algorithm: GAT + Traditional + Recency + Randomness.
+    Returns only note_ids.
     """
     try:
-        # Check if we should use winning group
-        winning_group = ab_test_service.get_winning_group()
-        
-        if winning_group:
-            # Use winning algorithm
-            recommendations = recommendation_service.get_recommendations(
-                user_id, ab_group=winning_group, limit=10
-            )
-            algorithm_used = f"Winner: Group {winning_group.value}"
-        elif ab_test:
-            # Use specified A/B group
-            recommendations = recommendation_service.get_recommendations(
-                user_id, ab_group=ab_test, limit=10
-            )
-            algorithm_used = f"A/B Test: Group {ab_test.value}"
-        else:
-            # Use default
-            recommendations = recommendation_service.get_default_recommendations(
-                user_id, limit=10
-            )
-            algorithm_used = "Default"
+        # Get recommendations (returns list of note_ids)
+        note_ids = recommendation_service.get_recommendations(user_id, limit=10)
         
         return RecommendationResponse(
             user_id=user_id,
-            recommended_notes=recommendations,
-            algorithm_used=algorithm_used
+            note_ids=note_ids
         )
     
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e))
+
+
+@app.post("/sync")
+async def trigger_sync():
+    """Manually trigger data synchronization."""
+    try:
+        count = data_sync_service.sync_notes()
+        return {
+            "status": "success",
+            "message": f"Synced {count} notes to Neo4j"
+        }
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e))
 
@@ -145,25 +197,6 @@ async def health_check():
         return HealthResponse(failure="internal error!")
 
 
-@app.on_event("startup")
-async def startup_event():
-    """Initialize on startup"""
-    print("Starting Note Recommendation API...")
-    print("Checking Neo4j connection...")
-    
-    if neo4j_client.verify_connectivity():
-        print("✓ Neo4j connected successfully")
-    else:
-        print("✗ Warning: Neo4j connection failed")
-
-
-@app.on_event("shutdown")
-async def shutdown_event():
-    """Cleanup on shutdown"""
-    neo4j_client.close()
-    print("Application shutdown complete")
-
-
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=8888)

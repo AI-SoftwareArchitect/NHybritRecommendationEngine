@@ -1,79 +1,175 @@
-# NHybritRecommendationEngine
-NHRE is a hybrit recommendation engine project.
+# Note Recommendation System
 
-![recommendation engine](recommendation-engine.png)
+Graph-based + GNN recommendation system with A/B testing capabilities.
 
-# 🧠 Hybrid Graph Recommendation Engine
+## Tech Stack
 
-A sophisticated, high-performance recommendation system that integrates **Graph Algorithms** and **Deep Learning** to deliver personalized content. This engine utilizes a dual-model approach, leveraging **Neo4j** for structural relationships and **GNNs** for latent feature representation.
+- **FastAPI**: REST API framework
+- **Neo4j AuraDB**: Graph database
+- **PyTorch + PyG**: GAT (Graph Attention Network) model
+- **Python-dotenv**: Environment configuration
 
----
+## Architecture
 
-## 🏗 System Architecture
+### Design Patterns Used
 
-The project is architected with a focus on high throughput and modularity, ensuring that the recommendation logic remains decoupled from the infrastructure.
+- **Singleton Pattern**: Neo4j client connection
+- **Factory Pattern**: Service initialization
+- **Strategy Pattern**: Different ranking algorithms for A/B groups
+- **DRY Principle**: Modular, reusable code throughout
 
-```mermaid
-graph TD
-    User((User)) --> API[FastAPI Gateway]
-    API --> RM[Ranking Model]
-    RM --> GRA[Graph-based Algorithm - PPR]
-    RM --> GNN[GNN Model - Torch]
-    GRA <--> DB[(Neo4j AuraDB)]
-    GNN <--> DB
-    API --> BW[Background Workers]
-    BW --> Retrain[Weekly Model Retraining
+### Graph Structure
+
+```
+(USER)-[:LIKED]->(NOTE)
+(NOTE)-[:HAS_TAG]->(TAG)
+(NOTE)-[:IN_CATEGORY]->(CATEGORY)
 ```
 
-# 🧠 Hybrid Graph Recommendation Engine
+### Recommendation Algorithm
 
-[cite_start]A high-performance recommendation system that merges traditional **Graph Algorithms** with **Deep Learning** (GNN) to deliver hyper-personalized content[cite: 1, 2]. [cite_start]The system is built with a modular architecture and an automated A/B testing framework to ensure continuous optimization[cite: 1, 2].
+1. **Graph-based**: Personalized PageRank with Cypher queries
+2. **Deep Learning**: GAT model for node embeddings
+3. **Hybrid Ranking**: `final_score = 0.4 * graph_score + 0.6 * gnn_score`
 
----
+## Setup
 
-## 🛠 Tech Stack
+### 1. Install Dependencies
 
-* [cite_start]**Framework:** Python FastAPI for high-performance asynchronous request handling[cite: 1].
-* [cite_start]**Database:** Neo4j AuraDB for cloud-native graph-based data persistence[cite: 1].
-* [cite_start]**Deep Learning:** PyTorch (Torch) specifically optimized for CPU-based training and inference[cite: 1].
-* [cite_start]**Environment Management:** Dotenv for secure and modular configuration management[cite: 1].
-* [cite_start]**Concurrency:** Background workers for non-blocking operations and asynchronous task execution[cite: 1].
+```bash
+pip install -r requirements.txt
+```
 
----
+### 2. Configure Environment
 
-## 🚀 Core Methodology
+Edit `.env` file with your Neo4j AuraDB credentials:
 
-### 🧩 Modular Design & Patterns
-* [cite_start]**DRY Principle:** The codebase strictly adheres to "Don't Repeat Yourself" to maximize maintainability[cite: 1].
-* [cite_start]**Design Patterns:** If a structural pattern emerges in the logic, appropriate software design patterns are implemented to keep the code clean and scalable[cite: 1].
+```env
+NEO4J_URI=neo4j+s://your-instance.databases.neo4j.io
+NEO4J_USER=neo4j
+NEO4J_PASSWORD=your-password
+AB_TEST_THRESHOLD_DATE=2025-01-01
+```
 
-### 📊 Recommendation Logic
-[cite_start]The engine calculates a `final_score` by aggregating two distinct intelligence sources[cite: 1]:
-* [cite_start]**Graph-based Algorithm:** Utilizes **Personalized PageRank (PPR)** via Cypher queries to navigate the relationship network[cite: 1].
-* [cite_start]**DL Model:** Employs a **Graph Neural Network (GNN)** to process complex node features and latent relationships[cite: 1].
-* [cite_start]**Ranking Formula:** $$final\_score = 0.4 \times graph\_score + 0.6 \times gnn\_score$$ [cite: 1]
+### 3. Initialize Mock Data
 
----
+```bash
+python database/init_mock_data.py
+```
 
-## 🧪 A/B Testing & Business Logic
+This creates:
+- 20 users
+- 100 notes
+- 8 tags
+- 5 categories
+- Sample LIKED relationships
 
-[cite_start]The system includes a built-in A/B testing framework designed to optimize user conversion rates[cite: 1, 2]:
+### 4. Run Application
 
-* [cite_start]**Interaction Tracking:** When a "like" event occurs, the system logs whether the user was served version 'A' or 'B' to track algorithm effectiveness[cite: 1].
-* [cite_start]**Data Freshness:** The system performs weekly data updates and triggers model retraining to adapt to shifting user trends[cite: 1].
-* [cite_start]**Automated Selection:** Following a predefined date, the system analyzes the performance of both versions; the variant with the higher engagement rate is then automatically selected for 100% of the traffic[cite: 2].
+```bash
+python main.py
+```
 
----
+Or with uvicorn:
 
-## 📡 API Endpoints
+```bash
+uvicorn main:app --reload --host 0.0.0.0 --port 8000
+```
 
-| Endpoint | Method | Description |
-| :--- | :--- | :--- |
-| `/recommendate` | `POST` | [cite_start]Generates recommendations using the hybrid ranking model[cite: 1]. |
-| `/like` | `POST` | [cite_start]Logs user engagement ('A' vs 'B') for A/B testing analytics[cite: 1]. |
-| `/update-graph` | `POST` | [cite_start]Synchronizes the Neo4j database with all notes from the primary database[cite: 1]. |
-| `/health` | `GET` | [cite_start]Standard system health and status check[cite: 1]. |
+## API Endpoints
 
----
+### POST /like
 
-**Would you like me to generate the implementation for the `Personalized PageRank` Cypher query used in the recommendation logic?**
+Record a user like (triggers A/B test tracking and background model training).
+
+```bash
+curl -X POST "http://localhost:8000/like?user_id=USER_UUID&note_id=NOTE_UUID&ab_test=A"
+```
+
+### GET /recommend
+
+Get personalized recommendations.
+
+```bash
+curl "http://localhost:8000/recommend?user_id=USER_UUID&ab_test=A"
+```
+
+After threshold date, winning algorithm is automatically used.
+
+### GET /ab_test_counts
+
+Get A/B test statistics.
+
+```bash
+curl "http://localhost:8000/ab_test_counts"
+```
+
+Response:
+```json
+{
+  "ab_test_a_like_count": 120,
+  "ab_test_b_like_count": 40,
+  "last_updated": "2024-12-18T10:30:00"
+}
+```
+
+### GET /healthy
+
+Health check endpoint.
+
+```bash
+curl "http://localhost:8000/healthy"
+```
+
+## A/B Testing Logic
+
+- **Group A**: `0.4 * graph_score + 0.6 * gnn_score`
+- **Group B**: `0.6 * graph_score + 0.4 * gnn_score`
+
+Likes are tracked per group in `data/ab_test_counts.json`. After `AB_TEST_THRESHOLD_DATE`, the winning group's algorithm is used automatically.
+
+## Model Training
+
+The GAT model is trained with:
+- **Architecture**: 2-layer GAT with 4 attention heads
+- **Features**: like_count, tag_count, category_embedding
+- **Training**: Random 80/20 split
+- **Storage**: `data/model_checkpoint.pt`
+
+Background training is triggered on each like (can be throttled to weekly in production).
+
+## Project Structure
+
+```
+project/
+├── config/
+│   └── settings.py          # Environment configuration
+├── database/
+│   ├── neo4j_client.py      # Singleton Neo4j connection
+│   └── init_mock_data.py    # Mock data generator
+├── models/
+│   ├── schemas.py           # Pydantic models
+│   └── gnn_model.py         # GAT implementation
+├── services/
+│   ├── ab_test_service.py   # A/B testing logic
+│   ├── graph_service.py     # Personalized PageRank
+│   ├── gnn_service.py       # GNN training/inference
+│   └── recommendation_service.py  # Hybrid ranking
+├── data/
+│   ├── ab_test_likes.json   # Individual like records
+│   ├── ab_test_counts.json  # Aggregated A/B counts
+│   └── model_checkpoint.pt  # Trained model
+└── main.py                  # FastAPI application
+```
+
+## Development Notes
+
+- All services use dependency injection via factory functions
+- Neo4j connection is singleton to prevent connection leaks
+- Background tasks handle model retraining asynchronously
+- Mock data provides realistic graph structure for testing
+- A/B test winner automatically takes over post-threshold
+
+## License
+
+MIT
